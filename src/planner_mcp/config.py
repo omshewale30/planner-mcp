@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -19,6 +20,27 @@ class ConfigError(RuntimeError):
     pass
 
 
+_REPO_RE = re.compile(r"^[\w.-]+/[\w.-]+$")
+
+
+@dataclass
+class GitHubConfig:
+    """Bug intake from GitHub Issues, read through Om's `gh` login (no token in this server)."""
+
+    repos: dict[str, str]  # prefix -> "owner/repo"
+    gh_path: str | None = None  # None: auto-detect
+    intake_types: list[str] = field(default_factory=lambda: ["Bug"])  # org issue types read
+    limit_per_repo: int = 50
+    timeout_s: float = 20
+    renamed: dict[str, str] = field(default_factory=dict)  # old "owner/repo" -> new
+
+    def prefix_for(self, repo: str) -> str | None:
+        for prefix, r in self.repos.items():
+            if r.lower() == repo.lower():
+                return prefix
+        return None
+
+
 @dataclass
 class Config:
     tenant_id: str
@@ -31,6 +53,7 @@ class Config:
     people: dict[str, str] = field(default_factory=dict)  # display name -> Entra object id
     people_lookup: bool = False
     auth_flow: str = "interactive"  # or "device_code"
+    github: GitHubConfig | None = None  # optional: intake tools are off without it
 
     @property
     def scopes(self) -> list[str]:
@@ -83,5 +106,43 @@ def load(path: str | os.PathLike | None = None) -> Config:
         people={str(k): str(v) for k, v in (raw.get("people") or {}).items()},
         people_lookup=bool(raw.get("people_lookup", False)),
         auth_flow=str(raw.get("auth_flow") or "interactive"),
+        github=_github(raw.get("github"), prefixes),
+    )
+
+
+def _github(raw: dict | None, prefixes: list[str]) -> GitHubConfig | None:
+    if not raw:
+        return None
+    if not isinstance(raw, dict) or not isinstance(raw.get("repos"), dict) or not raw["repos"]:
+        raise ConfigError("github.repos must map prefixes to repos, e.g. NIM: FO-AI/nimbus")
+    repos = {str(k).upper(): str(v) for k, v in raw["repos"].items()}
+    unknown = [k for k in repos if k not in prefixes]
+    if unknown:
+        raise ConfigError(f"github.repos has prefixes not in `prefixes`: {unknown}")
+    renamed = {str(k): str(v) for k, v in (raw.get("renamed") or {}).items()}
+    bad = [r for r in [*repos.values(), *renamed, *renamed.values()] if not _REPO_RE.match(r)]
+    if bad:
+        raise ConfigError(f"github repos must look like owner/name: {bad}")
+    if "intake_labels" in raw:
+        raise ConfigError(
+            "github.intake_labels was replaced by intake_types: bugs are found by their org "
+            "issue type now. Use `intake_types: [Bug]`."
+        )
+    types = ["Bug"] if raw.get("intake_types") is None else [str(x) for x in raw["intake_types"]]
+    if not types:
+        raise ConfigError("github.intake_types needs at least one issue type (e.g. [Bug]).")
+    limit = int(raw.get("limit_per_repo") or 50)
+    if not 1 <= limit <= 200:
+        raise ConfigError("github.limit_per_repo must be between 1 and 200.")
+    timeout = float(raw.get("timeout_s") or 20)
+    if timeout <= 0:
+        raise ConfigError("github.timeout_s must be positive.")
+    return GitHubConfig(
+        repos=repos,
+        gh_path=str(raw["gh_path"]) if raw.get("gh_path") else None,
+        intake_types=types,
+        limit_per_repo=limit,
+        timeout_s=timeout,
+        renamed=renamed,
     )
 

@@ -15,8 +15,10 @@ from mcp.server.fastmcp import FastMCP
 from . import config as cfgmod
 from .auth import AuthError, TokenProvider
 from .board import Board
-from .conventions import ConventionError
+from .conventions import ConventionError, DuplicateIssue
+from .github import GitHubClient, GitHubError
 from .graph import GraphError, PlannerClient
+from .intake import Intake
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,10 +33,18 @@ In Progress, Blocked, Review. No Done bucket: completed cards have percent_compl
 Titles carry a prefix [NIM] [PIQ] [QUAD] [OPS]. Tier (Small/Medium/Large) is stored as
 Planner priority. One assignee per card. Checklist max 20 items; steps are never cards.
 Call board_snapshot first; it returns every open card by bucket plus load per person.
+Bugs arrive as GitHub issues of type Bug. intake_list returns the open ones not yet on a card.
+Issues are the inbox and the board is the commitment: propose cards to Om and call create_task
+only after he confirms. Write an outcome title (never the issue's symptom title) and pass
+issue="owner/repo#N" so the card links back and the issue cannot become a second card.
+Issues carry the org type and fields (Priority, Product, Area). Two tools write to GitHub:
+close_issue and set_issue_fields. Call them only when Om asks (e.g. "mark #36 done", "set
+PIQ#36 to High"), never on inference. Ticking a card does not close its issue.
 """
 
 mcp = FastMCP("planner-board", instructions=INSTRUCTIONS)
 _board: Board | None = None
+_intake: Intake | None = None
 
 
 def board() -> Board:
@@ -47,10 +57,20 @@ def board() -> Board:
     return _board
 
 
+def intake() -> Intake:
+    global _intake
+    if _intake is None:
+        b = board()
+        _intake = Intake(b.cfg, b)
+    return _intake
+
+
 def _run(thunk) -> Any:
     """Run a zero-arg callable; convention/Graph/config failures come back as data."""
     try:
         return thunk()
+    except DuplicateIssue as e:
+        return {"error": "convention", "message": str(e), "task_id": e.task_id}
     except ConventionError as e:
         return {"error": "convention", "message": str(e)}
     except GraphError as e:
@@ -59,6 +79,11 @@ def _run(thunk) -> Any:
         return {"error": "config", "message": str(e)}
     except AuthError as e:
         return {"error": "auth", "message": str(e)}
+    except GitHubError as e:
+        out = {"error": "github", "message": str(e)}
+        if e.repo:
+            out["repo"] = e.repo
+        return out
 
 
 # ---- read ------------------------------------------------------------------
@@ -133,11 +158,19 @@ def create_task(
     due: str | None = None,
     description: str | None = None,
     checklist: list[str] | None = None,
+    issue: str | None = None,
 ) -> dict:
     """Create a card. Title must start with [NIM] [PIQ] [QUAD] or [OPS] and name an outcome.
     Label is set from the prefix. Tier maps to Planner priority. due is YYYY-MM-DD.
-    Checklist items are steps (max 20). Returns the created card."""
-    return _run(lambda: board().create(title, bucket, tier, assignee, due, description, checklist))
+    Checklist items are steps (max 20). issue="FO-AI/nimbus#42" links the card to that open
+    GitHub issue (Planner link + "Issue:" first line in the notes); refused if another card
+    already tracks it. Only after Om confirms. Returns the created card."""
+
+    def go():
+        ref = intake().resolve(issue) if issue else None
+        return board().create(title, bucket, tier, assignee, due, description, checklist, ref)
+
+    return _run(go)
 
 
 @mcp.tool()
@@ -192,8 +225,60 @@ def set_description(task_id: str, text: str) -> dict:
     return _run(lambda: board().set_description(task_id, text))
 
 
+# ---- bug intake (GitHub Issues) -------------------------------------------
+
+
+@mcp.tool()
+def intake_list(project: str | None = None, include_linked: bool = False) -> dict:
+    """Open GitHub issues of type Bug across the project repos, for proposing cards.
+    `issues` holds only issues no card tracks yet, sorted by Priority (Urgent first), then any
+    S1/S2/S3 label, then oldest first. Each has its org type and issue_fields (Priority,
+    Product, Area, ...), suggested_prefix, and the parsed bug-form fields (what happened,
+    expected, steps). `linked_done` lists issues whose card is completed but the issue is still
+    open. project: NIM, PIQ, QUAD or a repo name. include_linked=True also returns tracked
+    issues."""
+    return _run(lambda: intake().open_issues(project, include_linked))
+
+
+@mcp.tool()
+def intake_item(issue: str) -> dict:
+    """One issue in full: body, parsed form fields, recent comments, and the card tracking it
+    (linked_task_id) if any. issue is "FO-AI/nimbus#42", "NIM#42", the issue URL, or just
+    "#42" (the server finds the repo, and asks if more than one repo has that number)."""
+    return _run(lambda: intake().detail(issue))
+
+
+@mcp.tool()
+def link_issue(task_id: str, issue: str) -> dict:
+    """Link an existing card to a GitHub issue (Planner link + "Issue:" notes line). Refused
+    if another card already tracks the issue. Linking the same pair again is a no-op."""
+    return _run(
+        lambda: board().link_issue(task_id, intake().resolve(issue, require_open=False))
+    )
+
+
+@mcp.tool()
+def close_issue(issue: str, reason: str = "completed", comment: str | None = None) -> dict:
+    """Close a GitHub issue and tick any open card tracking it. Writes to GitHub: call only
+    when Om says the issue is fixed, done, or won't be fixed; never on inference.
+    reason: "completed" (default) or "not planned". comment is posted as the issue closes.
+    issue is "PIQ#36", "FO-AI/position-iq#36", or just "#36": the server finds the repo that
+    has it, and refuses (listing them) if more than one does. The result names the issue."""
+    return _run(lambda: intake().close(issue, reason, comment))
+
+
+@mcp.tool()
+def set_issue_fields(issue: str, fields: dict[str, str]) -> dict:
+    """Set org issue fields on a GitHub issue, e.g. {"Priority": "High", "Area": "API"}.
+    Writes to GitHub: call only when Om asks. Field names and options match
+    case-insensitively; dates are YYYY-MM-DD; "" clears a field. Fields not named are left
+    as they are. issue can be just "#36" (see close_issue). Returns the issue's fields after
+    the change."""
+    return _run(lambda: intake().set_fields(issue, fields))
+
+
 def login() -> int:
-    """`planner-mcp login`: sign in (device code), verify the plan, print a summary. Exits.
+    """`planner-mcp login`: sign in (browser), verify the plan and GitHub, print a summary.
     This is the only mode meant for a terminal; plain `planner-mcp` speaks MCP on stdio and
     is started by Claude desktop, not by hand."""
     cfg = cfgmod.load()
@@ -215,8 +300,30 @@ def login() -> int:
             f"{sorted(m.unknown_user_ids)}",
             file=err,
         )
+    _github_check(cfg, err)
     print("OK. Add the server to Claude desktop; see README.", file=err)
     return 0
+
+
+def _github_check(cfg: cfgmod.Config, err) -> None:
+    """Report GitHub reachability per repo. Informational: never fails the login."""
+    if cfg.github is None:
+        print("GitHub: no `github:` section in config; bug intake tools are off.", file=err)
+        return
+    client = GitHubClient(cfg.github)
+    print(f"GitHub: gh at {client.gh_path or 'NOT FOUND (set github.gh_path)'}", file=err)
+    problem = client.auth_problem()
+    if problem:
+        print(f"  {problem}", file=err)
+        return
+    types = cfg.github.intake_types
+    for prefix, repo in cfg.github.repos.items():
+        try:
+            numbers = {i["number"] for t in types for i in client.list_issues(repo, t)[0]}
+            what = "/".join(types)
+            print(f"  [{prefix}] {repo}: reachable, {len(numbers)} open {what} issue(s)", file=err)
+        except GitHubError as e:
+            print(f"  [{prefix}] {repo}: {e}", file=err)
 
 
 def main() -> None:

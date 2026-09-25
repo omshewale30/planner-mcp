@@ -1,5 +1,6 @@
 """An in-memory Planner behind httpx.MockTransport. Enough Graph semantics to test on:
-etags, 412 on stale etag, /details as a separate resource, appliedCategories, assignments."""
+etags, 412 on stale etag, /details as a separate resource, appliedCategories, assignments,
+external references (encoded keys, referenceCount on the task)."""
 
 from __future__ import annotations
 
@@ -17,6 +18,13 @@ USERS = {
     "u-daniel": {"id": "u-daniel", "displayName": "Daniel Zhang", "mail": "daniel@unc.edu"},
 }
 BUCKETS = ["Backlog", "Shaping", "This Week", "In Progress", "Blocked", "Review"]
+
+
+def encode_key(url: str) -> str:
+    """How Graph spells a reference key (independent of the code under test)."""
+    for ch, esc in (("%", "%25"), (".", "%2E"), (":", "%3A"), ("@", "%40"), ("#", "%23")):
+        url = url.replace(ch, esc)
+    return url
 
 
 class FakePlanner:
@@ -40,7 +48,8 @@ class FakePlanner:
         return next(b["id"] for b in self.buckets.values() if b["name"] == name)
 
     def add_task(self, title, bucket="Backlog", assignee=None, category=None, priority=5,
-                 percent=0, due=None, checklist=None, description=""):
+                 percent=0, due=None, checklist=None, description="", references=None):
+        """references: {url: alias}; stored under Graph's encoded keys."""
         tid = f"t-{uuid.uuid4().hex[:6]}"
         t = {
             "id": tid, "planId": PLAN, "bucketId": self.bucket_id(bucket), "title": title,
@@ -53,8 +62,12 @@ class FakePlanner:
         cl = {str(uuid.uuid4()): {"title": c, "isChecked": False, "orderHint": " !"} for c in (checklist or [])}
         t["checklistItemCount"] = len(cl)
         t["activeChecklistItemCount"] = len(cl)
+        refs = {encode_key(url): {"alias": alias, "type": "Other"}
+                for url, alias in (references or {}).items()}
+        t["referenceCount"] = len(refs)
         self.tasks[tid] = t
-        self.details[tid] = {"id": tid, "description": description, "checklist": cl, "@odata.etag": self._etag()}
+        self.details[tid] = {"id": tid, "description": description, "checklist": cl,
+                             "references": refs, "@odata.etag": self._etag()}
         return tid
 
     # -- transport
@@ -90,11 +103,12 @@ class FakePlanner:
                 "priority": body.get("priority", 5), "percentComplete": 0,
                 "dueDateTime": body.get("dueDateTime"), "assignments": body.get("assignments", {}),
                 "appliedCategories": body.get("appliedCategories", {}), "hasDescription": False,
-                "checklistItemCount": 0, "activeChecklistItemCount": 0,
+                "checklistItemCount": 0, "activeChecklistItemCount": 0, "referenceCount": 0,
                 "createdDateTime": "2026-09-21T00:00:00Z", "@odata.etag": self._etag(),
             }
             self.tasks[tid] = t
-            self.details[tid] = {"id": tid, "description": "", "checklist": {}, "@odata.etag": self._etag()}
+            self.details[tid] = {"id": tid, "description": "", "checklist": {}, "references": {},
+                                 "@odata.etag": self._etag()}
             return httpx.Response(201, json=t)
 
         m = re.fullmatch(r"/planner/tasks/([^/]+)(/details)?", path)
@@ -127,6 +141,16 @@ class FakePlanner:
                     self.tasks[tid]["checklistItemCount"] = len(obj["checklist"])
                     self.tasks[tid]["activeChecklistItemCount"] = sum(
                         1 for c in obj["checklist"].values() if not c.get("isChecked"))
+                if "references" in body:
+                    for k, v in body["references"].items():
+                        if re.search(r"[.:@#]", k) or re.search(r"%(?![0-9A-Fa-f]{2})", k):
+                            return httpx.Response(400, json={"error": {"message": f"bad key {k}"}})
+                        if v is None:
+                            obj["references"].pop(k, None)
+                        else:
+                            assert v.get("@odata.type") == "#microsoft.graph.plannerExternalReference"
+                            obj["references"][k] = {kk: vv for kk, vv in v.items() if not kk.startswith("@")}
+                    self.tasks[tid]["referenceCount"] = len(obj["references"])
             else:
                 if "assignments" in body:
                     for k, v in body["assignments"].items():

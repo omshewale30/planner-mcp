@@ -49,3 +49,16 @@ auth_flow: interactive
 
 # Where the MSAL token cache lives. Created with mode 0600.
 token_cache: "~/.config/planner-mcp/token_cache.json"
+
+# Optional: bug intake from GitHub Issues. Read through your existing `gh` login (no token
+# here). Without this section the intake tools return {"error": "config"} and the rest works.
+github:
+  gh_path: null            # auto-detect: PATH, then /opt/homebrew/bin/gh, /usr/local/bin/gh
+  repos:                   # prefix -> repo; prefixes must be in `prefixes` above
+    NIM: FO-AI/nimbus
+    PIQ: FO-AI/position-iq
+    QUAD: FO-AI/benny
+  intake_types: [Bug]      # org issue types offered as cards (the bug form sets Bug)
+  limit_per_repo: 50
+  timeout_s: 20
+  renamed: {}              # after renaming a repo: {FO-AI/benny: FO-AI/quad}, so old links still match

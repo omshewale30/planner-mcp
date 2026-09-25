@@ -12,6 +12,14 @@ class ConventionError(ValueError):
     pass
 
 
+class DuplicateIssue(ConventionError):
+    """One issue, one card. Carries the card that already tracks the issue."""
+
+    def __init__(self, message: str, task_id: str):
+        super().__init__(message)
+        self.task_id = task_id
+
+
 def check_title(title: str, prefixes: list[str]) -> str:
     title = title.strip()
     m = _PREFIX_RE.match(title)

@@ -1,8 +1,15 @@
 # Plan: GitHub Issues intake for planner-mcp
 
-Status: **awaiting Om's approval.** No code written yet. Companion to `HANDOFF-github-issues.md`.
-Written 2026-09-25 after reading the repo, running the suite (19 pass, ruff clean), and read-only
-checks against GitHub (`gh`) and the live board (Graph GETs only).
+Status: **built 2026-09-25** (Om approved: "read only issues with label bug"). Companion to
+`HANDOFF-github-issues.md`. Decisions taken at build time:
+
+- Only issues labelled `bug` are read (config `intake_labels`); `intake_list` has no per-call
+  `labels` override, so Claude cannot widen it.
+- Recommended defaults for the open questions below: link = Planner reference (authoritative) +
+  notes line; no write-back to GitHub; severity S1/S2/S3 from the form, label overrides; OPS has
+  no repo; roadmap not configured; form not pushed to project repos; no git init.
+- Since this plan was written, Om filed position-iq #34-#45 (labelled `bug`, not via the form),
+  which `intake_list` returns live. Finding 1-2 below are now out of date.
 
 ---
 

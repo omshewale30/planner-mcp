@@ -8,6 +8,7 @@ import uuid
 from dataclasses import dataclass, field
 
 from . import conventions as conv
+from . import links
 from .config import Config
 from .graph import GraphError, PlannerClient
 
@@ -188,8 +189,60 @@ class Board:
         c["checklist"] = [
             {"id": k, "title": v.get("title"), "checked": bool(v.get("isChecked"))} for k, v in items
         ]
+        c["issues"] = [f"{r}#{n}" for r, n in _linked_issues(d)]
         c["details_etag"] = d.get("@odata.etag")
         return c
+
+    # ---- issue links -------------------------------------------------------
+
+    def issue_links(self) -> dict[str, list[dict]]:
+        """Every card linked to a GitHub issue, open and completed, keyed by links.link_key.
+        Only tasks with referenceCount > 0 have their /details read."""
+        m = self.meta()
+        out: dict[str, list[dict]] = {}
+        for t in self.client.tasks():
+            if not t.get("referenceCount"):
+                continue
+            for repo, number in _linked_issues(self.client.task_details(t["id"])):
+                out.setdefault(self._link_key(repo, number), []).append({
+                    "task_id": t["id"],
+                    "title": t.get("title"),
+                    "bucket": m.bucket_by_id.get(t.get("bucketId"), t.get("bucketId")),
+                    "completed": t.get("percentComplete", 0) == 100,
+                })
+        return out
+
+    def _link_key(self, repo: str, number: int) -> str:
+        return links.link_key(repo, number, self.cfg.github.renamed if self.cfg.github else {})
+
+    def _ref_key(self, ref: links.IssueRef) -> str:
+        return self._link_key(*(links.issue_in_url(ref.link_url) or (ref.repo, ref.number)))
+
+    def _check_not_linked(self, ref: links.IssueRef, task_id: str | None = None) -> None:
+        for card in self.issue_links().get(self._ref_key(ref), []):
+            if card["task_id"] != task_id:
+                state = "completed" if card["completed"] else card["bucket"]
+                raise conv.DuplicateIssue(
+                    f"{ref} is already tracked by card {card['task_id']} {card['title']!r} "
+                    f"({state}). One issue, one card: reopen or update that card instead.",
+                    card["task_id"],
+                )
+
+    def link_issue(self, task_id: str, ref: links.IssueRef) -> dict:
+        """Attach an issue to an existing card: Planner reference + `Issue:` notes line.
+        Linking the same pair again changes nothing."""
+        self._check_not_linked(ref, task_id)
+        d = self.client.task_details(task_id)
+        body: dict = {}
+        if self._ref_key(ref) not in {self._link_key(r, n) for r, n in _linked_issues(d)}:
+            body["references"] = links.reference_body(ref)
+        desc = d.get("description") or ""
+        line = links.issue_line(ref)
+        if line not in desc.splitlines():
+            body["description"] = f"{line}\n\n{desc}" if desc.strip() else line
+        if body:
+            self.client.patch_details(task_id, body, etag=d.get("@odata.etag"))
+        return self.card(task_id)
 
     # ---- writing -----------------------------------------------------------
 
@@ -202,12 +255,23 @@ class Board:
         due: str | None = None,
         description: str | None = None,
         checklist: list[str] | None = None,
+        issue: links.IssueRef | None = None,
     ) -> dict:
+        """`issue` must already be resolved and checked against GitHub (see Intake.resolve)."""
         m = self.meta()
         prefix = conv.check_title(title, self.cfg.prefixes)
         bucket_name = conv.check_bucket(bucket, self.cfg.buckets)
         tier_name = conv.check_tier(tier, self.cfg.tier_priority)
         items = conv.check_checklist(checklist or [])
+        warnings: list[str] = []
+        if issue:
+            self._check_not_linked(issue)
+            description = (
+                f"{links.issue_line(issue)}\n\n{description}" if description else links.issue_line(issue)
+            )
+            expected = self.cfg.github.prefix_for(issue.repo) if self.cfg.github else None
+            if expected and expected != prefix:
+                warnings.append(f"{issue.repo} is [{expected}] work but the title is [{prefix}].")
 
         body: dict = {
             "bucketId": m.bucket_by_name[bucket_name],
@@ -231,8 +295,13 @@ class Board:
                 details_body["description"] = description
             if items:
                 details_body["checklist"] = _checklist_body(items)
+            if issue:
+                details_body["references"] = links.reference_body(issue)
             self.client.patch_details(task["id"], details_body)
-        return self.card(task["id"])
+        card = self.card(task["id"])
+        if warnings:
+            card["warnings"] = warnings
+        return card
 
     def move(self, task_id: str, bucket: str) -> dict:
         m = self.meta()
@@ -308,6 +377,12 @@ class Board:
         d = self.client.task_details(task_id)
         self.client.patch_details(task_id, {"description": text}, etag=d.get("@odata.etag"))
         return self.card(task_id)
+
+
+def _linked_issues(details: dict) -> list[tuple[str, int]]:
+    """(repo, number) for each GitHub issue among a card's references; other links ignored."""
+    found = (links.issue_in_url(links.decode_key(k)) for k in (details.get("references") or {}))
+    return [f for f in found if f]
 
 
 def _checklist_body(items: list[str]) -> dict:
