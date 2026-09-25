@@ -1,0 +1,51 @@
+# Copy to ~/.config/planner-mcp/config.yaml (or point PLANNER_MCP_CONFIG at it).
+
+# Entra app registration (public client, "Allow public client flows" = Yes).
+tenant_id: "00000000-0000-0000-0000-000000000000"
+client_id: "00000000-0000-0000-0000-000000000000"
+
+# The FO-AI plan. From the Planner URL: .../planner/plans/<plan_id>/...
+plan_id: "REPLACE_ME"
+
+# Board Conventions v1.1 buckets, in board order. Names must match Planner exactly.
+buckets:
+  - Backlog
+  - Shaping
+  - This Week
+  - In Progress
+  - Blocked
+  - Review
+
+# Title prefixes the board allows. Planner label names (plan categoryDescriptions)
+# are matched to these case-insensitively, so label "NIM" -> prefix "[NIM]".
+prefixes: [NIM, PIQ, QUAD, OPS]
+
+# Tier -> Planner priority (Addendum A stores tier in the priority field).
+# Planner UI: 1 Urgent, 3 Important, 5 Medium, 9 Low.
+tier_priority:
+  Small: 5
+  Medium: 3
+  Large: 1
+
+# People on the board: display name -> Entra object ID. The server needs no directory
+# permission for this; it is the source of truth for names on cards and for `assignee`
+# in create/update. Get IDs from `planner-mcp login` (it lists unresolved assignee ids
+# it sees on the board) or from Entra admin center -> Users -> Object ID.
+people:
+  Chris Kim: "00000000-0000-0000-0000-000000000001"
+  Kaiji Fu: "00000000-0000-0000-0000-000000000002"
+  Daniel Zhang: "00000000-0000-0000-0000-000000000003"
+  Eshaam Bhattad: "00000000-0000-0000-0000-000000000004"
+  Ayush Sagar: "00000000-0000-0000-0000-000000000005"
+
+# Optional: resolve unknown assignees via Graph (/users/{id}). Adds the delegated scope
+# User.ReadBasic.All to the sign-in, which some tenants gate. Off by default.
+people_lookup: false
+
+# Sign-in flow used by `planner-mcp login`. "interactive" opens your browser (auth code +
+# PKCE on a localhost redirect) and is what UNC's Conditional Access allows.
+# "device_code" is blocked by UNC policy; kept for tenants that permit it.
+auth_flow: interactive
+
+# Where the MSAL token cache lives. Created with mode 0600.
+token_cache: "~/.config/planner-mcp/token_cache.json"

@@ -1,0 +1,33 @@
+[project]
+name = "planner-mcp"
+version = "0.1.0"
+description = "Local MCP server exposing the FO-AI Microsoft Planner board to Claude."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp[cli]>=1.20,<2",  # 2.x renamed FastMCP -> MCPServer; migrate deliberately
+    "msal>=1.31",
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+planner-mcp = "planner_mcp.server:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/planner_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
