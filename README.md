@@ -16,7 +16,7 @@ A local MCP server that gives Claude the FO-AI Microsoft Planner board: read eve
 | `set_checklist(task_id, items, replace=True)` | Steps. Max 20. |
 | `add_note(task_id, text)` | Appends `[YYYY-MM-DD] text` to the notes. |
 | `set_description(task_id, text)` | Replaces the notes. |
-| `intake_list(project?, include_linked=False)` | Open GitHub issues of type **Bug** that no card tracks yet, with their org type and fields (Priority, Product, Area). Priority sorts first, then age. |
+| `intake_list(project?, include_linked=False)` | Open GitHub issues of the configured types (`intake_types`, e.g. Bug) that no card tracks yet, with their org type and fields (Priority, Product, Area). Priority sorts first, then age. |
 | `intake_item(issue)` | One issue in full: body, form fields, recent comments, linked card. |
 | `link_issue(task_id, issue)` | Link an existing card to an issue. |
 | `close_issue(issue, reason="completed", comment?)` | **Writes to GitHub.** Closes the issue and ticks any open card tracking it. Only when Om says it's done. |
@@ -87,7 +87,7 @@ If the token ever expires hard (password change, Conditional Access re-evaluatio
 
 Bugs are filed as GitHub issues in the project repos. Claude reads them, proposes cards, and creates only the ones Om confirms. Issues are the inbox; the board is the commitment. Nothing syncs automatically.
 
-**The Monday flow.** Om asks for cards from the open bugs. `intake_list` returns every open issue of type Bug in the configured repos that no card tracks yet, oldest first, each with a `suggested_prefix` and the bug form's fields (what happened, expected, steps, environment, logs). Claude proposes cards: an outcome title (never the issue's symptom title), assignee, bucket, and the repro in the notes. Om confirms or edits. Claude then calls `create_task(..., issue="FO-AI/nimbus#42")` for each confirmed card. Next time, those issues are gone from `intake_list`.
+**The Monday flow.** Om asks for cards from the open bugs. `intake_list` returns every open issue of the configured types (`intake_types`; Bug by default) in the configured repos that no card tracks yet, oldest first, each with a `suggested_prefix` and the bug form's fields (what happened, expected, steps, environment, logs). Claude proposes cards: an outcome title (never the issue's symptom title), assignee, bucket, and the repro in the notes. Om confirms or edits. Claude then calls `create_task(..., issue="FO-AI/nimbus#42")` for each confirmed card. Next time, those issues are gone from `intake_list`.
 
 **Naming an issue.** Any tool that takes an issue accepts `PIQ#36`, `FO-AI/position-iq#36`, the issue URL, or just `#36`. Issue numbers restart in every repo, so for a bare number the server checks each configured repo and uses the one that has that issue (PRs don't count). If more than one repo does, it prefers the single open one; otherwise it lists them and Claude asks. If a repo can't be reached, it refuses rather than guess.
 

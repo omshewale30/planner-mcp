@@ -33,7 +33,8 @@ In Progress, Blocked, Review. No Done bucket: completed cards have percent_compl
 Titles carry a prefix [NIM] [PIQ] [QUAD] [OPS]. Tier (Small/Medium/Large) is stored as
 Planner priority. One assignee per card. Checklist max 20 items; steps are never cards.
 Call board_snapshot first; it returns every open card by bucket plus load per person.
-Bugs arrive as GitHub issues of type Bug. intake_list returns the open ones not yet on a card.
+Work arrives as GitHub issues (types set by intake_types in config; the bug form sets Bug).
+intake_list returns the open ones not yet on a card.
 Issues are the inbox and the board is the commitment: propose cards to Om and call create_task
 only after he confirms. Write an outcome title (never the issue's symptom title) and pass
 issue="owner/repo#N" so the card links back and the issue cannot become a second card.
@@ -230,7 +231,8 @@ def set_description(task_id: str, text: str) -> dict:
 
 @mcp.tool()
 def intake_list(project: str | None = None, include_linked: bool = False) -> dict:
-    """Open GitHub issues of type Bug across the project repos, for proposing cards.
+    """Open GitHub issues of the configured types (`types` in the result) across the project
+    repos, for proposing cards.
     `issues` holds only issues no card tracks yet, sorted by Priority (Urgent first), then any
     S1/S2/S3 label, then oldest first. Each has its org type and issue_fields (Priority,
     Product, Area, ...), suggested_prefix, and the parsed bug-form fields (what happened,
