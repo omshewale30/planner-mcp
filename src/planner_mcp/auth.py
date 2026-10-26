@@ -36,12 +36,15 @@ class TokenProvider:
         self._allow_interactive = allow_interactive
         self._cache = msal.SerializableTokenCache()
         self._cache_path: Path = cfg.token_cache
-        if self._cache_path.exists():
-            self._cache.deserialize(self._cache_path.read_text())
+        self._load()
         atexit.register(self._persist)
         self._app = msal.PublicClientApplication(
             cfg.client_id, authority=cfg.authority, token_cache=self._cache
         )
+
+    def _load(self) -> None:
+        if self._cache_path.exists():
+            self._cache.deserialize(self._cache_path.read_text())
 
     def _persist(self) -> None:
         if not self._cache.has_state_changed:
@@ -52,13 +55,25 @@ class TokenProvider:
         os.chmod(tmp, 0o600)
         tmp.replace(self._cache_path)
 
-    def token(self) -> str:
+    def _silent(self) -> str | None:
         accounts = self._app.get_accounts()
-        if accounts:
-            result = self._app.acquire_token_silent(self._cfg.scopes, account=accounts[0])
-            if result and "access_token" in result:
-                self._persist()
-                return result["access_token"]
+        if not accounts:
+            return None
+        result = self._app.acquire_token_silent(self._cfg.scopes, account=accounts[0])
+        if not (result and "access_token" in result):
+            return None
+        self._persist()
+        return result["access_token"]
+
+    def token(self) -> str:
+        access_token = self._silent()
+        if access_token is None:
+            # The server is long-lived; `planner-mcp login` in a terminal may have written a
+            # fresh cache after we loaded ours. Re-read it before telling Om to sign in.
+            self._load()
+            access_token = self._silent()
+        if access_token is not None:
+            return access_token
 
         if not self._allow_interactive:
             raise AuthError(
