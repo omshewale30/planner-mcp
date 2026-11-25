@@ -1,0 +1,11 @@
+.git
+.venv
+.vscode
+.pytest_cache
+.ruff_cache
+**/__pycache__
+config.yaml
+token_cache.json
+e2e
+tests
+docs

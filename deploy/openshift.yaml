@@ -1,0 +1,107 @@
+# planner-mcp on Carolina CloudApps (OpenShift). Applied by deploy/deploy.sh.
+# Secrets (config file, API key, GitHub token) are created by the script, never stored here.
+apiVersion: v1
+kind: List
+items:
+  - apiVersion: image.openshift.io/v1
+    kind: ImageStream
+    metadata:
+      name: planner-mcp
+      labels: {app: planner-mcp}
+
+  - apiVersion: build.openshift.io/v1
+    kind: BuildConfig
+    metadata:
+      name: planner-mcp
+      labels: {app: planner-mcp}
+    spec:
+      source:
+        type: Git
+        git:
+          uri: https://github.com/omshewale30/planner-mcp.git
+          ref: main
+      strategy:
+        type: Docker
+        dockerStrategy: {}
+      output:
+        to: {kind: ImageStreamTag, name: "planner-mcp:latest"}
+      triggers:
+        - type: ConfigChange
+
+  # Holds token_cache.json. The server refreshes the Microsoft token and writes it back here,
+  # so this must be a writable volume (a Secret mount would be read-only).
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: planner-mcp-data
+      labels: {app: planner-mcp}
+    spec:
+      accessModes: [ReadWriteOnce]
+      resources:
+        requests: {storage: 1Gi}
+
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: planner-mcp
+      labels: {app: planner-mcp}
+      annotations:
+        image.openshift.io/triggers: >-
+          [{"from":{"kind":"ImageStreamTag","name":"planner-mcp:latest"},
+          "fieldPath":"spec.template.spec.containers[?(@.name==\"planner-mcp\")].image"}]
+    spec:
+      replicas: 1
+      # One pod at a time: the volume is ReadWriteOnce and only one writer may own the cache.
+      strategy: {type: Recreate}
+      selector:
+        matchLabels: {app: planner-mcp}
+      template:
+        metadata:
+          labels: {app: planner-mcp}
+        spec:
+          containers:
+            - name: planner-mcp
+              image: " "  # filled in by the image trigger above
+              ports: [{containerPort: 8080}]
+              envFrom:
+                - secretRef: {name: planner-mcp-secrets}  # PLANNER_MCP_API_KEY, GH_TOKEN
+              volumeMounts:
+                - {name: config, mountPath: /config, readOnly: true}
+                - {name: data, mountPath: /data}
+              # TCP, because /mcp itself requires the API key.
+              readinessProbe:
+                tcpSocket: {port: 8080}
+                initialDelaySeconds: 3
+                periodSeconds: 10
+              resources:
+                requests: {cpu: 50m, memory: 192Mi}
+                limits: {cpu: 500m, memory: 512Mi}
+          volumes:
+            - name: config
+              secret: {secretName: planner-mcp-config}
+            - name: data
+              persistentVolumeClaim: {claimName: planner-mcp-data}
+
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: planner-mcp
+      labels: {app: planner-mcp}
+    spec:
+      selector: {app: planner-mcp}
+      ports: [{name: http, port: 8080, targetPort: 8080}]
+
+  - apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata:
+      name: planner-mcp
+      labels: {app: planner-mcp}
+      annotations:
+        # GitHub intake checks several repos in one call; the router's 30 s default is tight.
+        haproxy.router.openshift.io/timeout: 120s
+    spec:
+      to: {kind: Service, name: planner-mcp}
+      port: {targetPort: http}
+      tls:
+        termination: edge
+        insecureEdgeTerminationPolicy: Redirect

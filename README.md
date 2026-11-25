@@ -144,7 +144,8 @@ uv run ruff check src tests
 - **Etags.** Every PATCH sends `If-Match`; on 412 the client refetches and retries once. A card edited in the Planner UI moments earlier still updates.
 - **GitHub through `gh`, as Om.** No token or OAuth app in this server; it runs `gh` (GraphQL for issues and org fields, `gh issue close` for closing) with stdin closed and output captured (stdout is the MCP wire). Reads by default; the two writes happen only when Om asks. Dedup reads `/details` only for cards whose `referenceCount` is above zero, so it stays cheap as the board grows.
 - **No comments API.** Planner comments live in the group's Outlook conversation. Notes (`add_note`) carry dated lines instead, which is what the conventions ask for anyway.
-- **Out of scope for v0.1:** remote/HTTP transport, multiple plans, deleting tasks, recurring tasks.
+- **Hosted mode.** `planner-mcp serve` runs the same tools over HTTP behind an API key, for Carolina CloudApps; see [deploy/README.md](deploy/README.md).
+- **Out of scope for v0.1:** multiple plans, deleting tasks, recurring tasks.
 
 ## Where this came from
 

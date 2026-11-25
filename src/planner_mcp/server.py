@@ -1,6 +1,7 @@
-"""planner-mcp: the FO-AI Planner board as MCP tools, over stdio.
+"""planner-mcp: the FO-AI Planner board as MCP tools, over stdio or HTTP.
 
-Run:  planner-mcp            (after `uv sync`)  or  python -m planner_mcp
+Run:  planner-mcp            (stdio, started by Claude desktop)  or  python -m planner_mcp
+      planner-mcp serve      (HTTP, for hosting; see remote.py)
 Config: ~/.config/planner-mcp/config.yaml  (see config.example.yaml)
 """
 
@@ -13,6 +14,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from . import config as cfgmod
+from . import remote
 from .auth import AuthError, TokenProvider
 from .board import Board
 from .conventions import ConventionError, DuplicateIssue
@@ -335,6 +337,13 @@ def main() -> None:
         except (cfgmod.ConfigError, GraphError, AuthError, RuntimeError) as e:
             print(f"planner-mcp: {e}", file=sys.stderr)
             sys.exit(1)
+    if len(sys.argv) > 1 and sys.argv[1] == "serve":
+        try:
+            remote.serve(mcp)
+        except remote.MissingApiKey as e:
+            print(f"planner-mcp: {e}", file=sys.stderr)
+            sys.exit(1)
+        return
     if sys.stdin.isatty():
         print(
             "planner-mcp speaks MCP over stdio and is meant to be launched by Claude desktop.\n"
