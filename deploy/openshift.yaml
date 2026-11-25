@@ -72,7 +72,7 @@ items:
                 initialDelaySeconds: 3
                 periodSeconds: 10
               resources:
-                requests: {cpu: 50m, memory: 192Mi}
+                requests: {cpu: 100m, memory: 192Mi}  # project minimum is 60m per pod
                 limits: {cpu: 500m, memory: 512Mi}
           volumes:
             - name: config
