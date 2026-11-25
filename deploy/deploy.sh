@@ -38,13 +38,20 @@ fi
 
 # 3. Build from GitHub and roll out.
 oc apply -f "$REPO_ROOT/deploy/openshift.yaml"
-oc start-build "$APP" --follow
+oc start-build "$APP" --follow --wait  # --wait: exit non-zero if the build fails
 image="$(oc get istag "$APP:latest" -o jsonpath='{.image.dockerImageReference}')"
 oc set image deployment/"$APP" "$APP=$image"
 oc rollout status deployment/"$APP" --timeout=180s
 
-# 4. Copy the Microsoft sign-in from this laptop onto the server's volume.
-"$REPO_ROOT/deploy/reseed-signin.sh"
+# 4. First deploy only: copy the Microsoft sign-in from this laptop onto the server's volume.
+# Later the server's own copy is the live one; overwriting it with an older laptop copy
+# could replace a working sign-in with a dead one. Use reseed-signin.sh for that on purpose.
+pod="$(oc get pods -l app="$APP" --field-selector=status.phase=Running -o name | head -1)"
+if oc exec "${pod#pod/}" -- test -f /data/token_cache.json; then
+  echo "Server already has a sign-in; leaving it. (deploy/reseed-signin.sh replaces it.)"
+else
+  "$REPO_ROOT/deploy/reseed-signin.sh"
+fi
 
 echo
 echo "URL:     https://$(oc get route "$APP" -o jsonpath='{.spec.host}')/mcp"

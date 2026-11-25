@@ -14,7 +14,8 @@ What it proves, each a line in the report:
   5. After the laptop's token cache is copied into /data (the reseed step), with its
      access tokens removed so the refresh token must be used, the same
      running server reads the board: no restart needed.
-  6. GitHub intake works with GH_TOKEN and no `gh auth login`.
+  6. GitHub intake works with GH_TOKEN and no `gh auth login`. Uses $GH_TOKEN if set (to
+     test the token the server will get), else this laptop's `gh auth token`.
   7. The refreshed token cache is written back to /data.
 
 Run:  uv run python e2e/container_check.py
@@ -199,8 +200,9 @@ def main() -> int:
         print(build.stderr[-2000:], file=sys.stderr)
         return 1
     image_id = docker("image", "inspect", "-f", "{{.Id}}", IMAGE).stdout.strip()
-    gh_token = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True,
-                              check=True).stdout.strip()
+    # GH_TOKEN, when set, is the token the server will get: test that one before uploading it.
+    gh_token = os.environ.get("GH_TOKEN") or subprocess.run(
+        ["gh", "auth", "token"], capture_output=True, text=True, check=True).stdout.strip()
 
     with tempfile.TemporaryDirectory() as tmp:
         workdir = Path(tmp)

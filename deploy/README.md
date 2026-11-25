@@ -17,13 +17,15 @@ No rebuild or restart is needed.
 ## First deploy
 
 1. **Sign in to the cluster.** Connect to the UNC VPN if you're off campus. Then open the CloudApps web console, choose your name (top right), then **Copy login command**, and run the `oc login --token=... --server=https://api.cloudapps.unc.edu:6443` line it shows. Select your project: `oc project <your-project>`.
-2. **GitHub token for the server.** Create a classic personal access token with `repo` and `read:org` scopes ([github.com/settings/tokens](https://github.com/settings/tokens)) and authorize it for the FO-AI org (SSO). Then `export GH_TOKEN=<token>`.
+2. **GitHub token for the server.** Create a classic personal access token with `repo` and `read:org` scopes ([github.com/settings/tokens](https://github.com/settings/tokens)). If FO-AI enforces SSO, GitHub shows a **Configure SSO** button next to the token; authorize it for FO-AI there. Then `export GH_TOKEN=<token>` and check it before it goes up: `uv run python e2e/container_check.py` uses `$GH_TOKEN` when set. That check covers reading issues. The two GitHub write tools (`close_issue`, `set_issue_fields`) have not been tried with this narrower token yet.
 3. **Deploy:** `deploy/deploy.sh`. It:
    1. builds the image from the GitHub repo's `main` branch
    2. creates the secrets (your config, a generated API key, the GitHub token)
    3. rolls out the server
    4. copies your sign-in onto it
    5. prints the URL
+
+   Step 4 runs only on the first deploy. After that the server's sign-in is the live copy, and only `deploy/reseed-signin.sh` replaces it.
 
 Re-run `deploy/deploy.sh` after pushing to `main` to ship new code. It keeps the API key.
 

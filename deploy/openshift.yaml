@@ -25,8 +25,6 @@ items:
         dockerStrategy: {}
       output:
         to: {kind: ImageStreamTag, name: "planner-mcp:latest"}
-      triggers:
-        - type: ConfigChange
 
   # Holds token_cache.json. The server refreshes the Microsoft token and writes it back here,
   # so this must be a writable volume (a Secret mount would be read-only).
